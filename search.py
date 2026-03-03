@@ -145,7 +145,11 @@ def search_query(query_tokens, posting_byte_pos, doc_mapping, top_k=5):
     results = []
     for doc_id, score in ranked[:top_k]:
         url = doc_mapping.get(doc_id, "Unknown URL")
-        results.append((url, score))
+        # results.append((url, score))
+        results.append({
+            "url": url,
+            "score": score
+        })
 
     return results
 
@@ -175,9 +179,9 @@ def main():
             print("not fing any result")
         else:
             print(f"\nSearch Results (Top 5):")
-            for i, (url, score) in enumerate(results, 1):
-                print(f"{i}. {url}")
-                print(f"   Score: {score:.4f}")
+            for i, res in enumerate(results, 1):
+                print(f"{i}. {res['url']}")
+                print(f"   Score: {res['score']:.4f}")
 
 if __name__ == "__main__":
     main()
