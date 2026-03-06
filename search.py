@@ -29,8 +29,7 @@ def load_doc_mapping_file():
         a dictionary of doc id and its corresponding url
     """
     with open(MAPPING_FILE, 'rb') as f:
-        doc_url_mapping = pickle.load(f)
-        return doc_url_mapping
+        return pickle.load(f)
     
 def preprocess_query(search_query):
     """
@@ -42,8 +41,7 @@ def preprocess_query(search_query):
     Returns:
         a list of tokenized and stemmed tokens
     """
-    tokens = preprocess_text(search_query)
-    return tokens
+    return preprocess_text(search_query)
     
 # def read_postings(token, posting_byte_pos):
 #     """
@@ -93,6 +91,53 @@ def intersect(p1, p2):
             j += 1
     return result
 
+def search_with_or(query_tokens, posting_byte_pos, doc_mapping, top_k=5):
+    """
+    OR search - used when AND returns no result.
+    """
+    total_docs = len(doc_mapping)
+    scores = defaultdict(float)
+    doc_term_count = defaultdict(int)
+    
+    with open(MERGED_INDEX, 'rb') as f:
+        for token in query_tokens:
+            if token not in posting_byte_pos:
+                continue
+            
+            offset, length = posting_byte_pos[token]
+            f.seek(offset)
+            byte_raw_data = f.read(length)
+            postings = decode(byte_raw_data)
+            
+            df = len(postings)
+            if df == 0:
+                continue
+            
+            idf = math.log(total_docs / df)
+            
+            for doc_id, tf, is_important in postings:
+                if tf > 0:
+                    tfidf = (1 + math.log(tf)) * idf
+                    if is_important:
+                        tfidf *= 2.0
+                    scores[doc_id] += tfidf
+                    doc_term_count[doc_id] += 1
+    
+    for doc_id in scores:
+        match_ratio = doc_term_count[doc_id] / len(query_tokens)
+        scores[doc_id] *= (1 + match_ratio)
+    
+    if not scores:
+        return []
+    
+    ranked = heapq.nlargest(top_k, scores.items(), key=lambda x: x[1])
+    results = []
+    for doc_id, score in ranked:
+        url = doc_mapping.get(doc_id, "Unknown URL")
+        results.append({"url": url, "score": score})
+    
+    return results
+
 def search_query(query_tokens, posting_byte_pos, doc_mapping, top_k=5):
     """
     Look up the term in posting byte pos and retrieve the posting docs in O(1) time
@@ -140,8 +185,9 @@ def search_query(query_tokens, posting_byte_pos, doc_mapping, top_k=5):
     result = all_postings[0]
     for i in range(1, len(all_postings)):
         result = intersect(result, all_postings[i])
+        #return with using OR search
         if not result:
-            return []
+            return search_with_or(query_tokens, posting_byte_pos, doc_mapping, top_k)
         
     # Calculate TF-IDF scores, only for documents in the AND result
     valid_doc_ids = set(p[0] for p in result)
@@ -162,9 +208,9 @@ def search_query(query_tokens, posting_byte_pos, doc_mapping, top_k=5):
             if tf > 0 and idf > 0:
                 tfidf = (1 + math.log(tf)) * idf
                 
-                #import will earn 1.5x weight
+                #import will earn 2x weight
                 if is_important:
-                    tfidf *= 1.5
+                    tfidf *= 2.0
                 
                 scores[doc_id] += tfidf
 
