@@ -2,7 +2,7 @@ import pickle
 import math
 import time
 from collections import defaultdict
-from indexer import preprocess_text
+from indexer import preprocess_text, generate_ngrams
 from decode import decode
 import heapq
 
@@ -93,14 +93,18 @@ def intersect(p1, p2):
 
 def search_with_or(query_tokens, posting_byte_pos, doc_mapping, top_k=5):
     """
-    OR search - used when AND returns no result.
+    EC: OR search - contain 2-gram searching
     """
     total_docs = len(doc_mapping)
     scores = defaultdict(float)
     doc_term_count = defaultdict(int)
     
+    # EC: search 2-gram
+    bigrams = generate_ngrams(query_tokens, 2)
+    all_search_terms = query_tokens + bigrams
+    
     with open(MERGED_INDEX, 'rb') as f:
-        for token in query_tokens:
+        for token in all_search_terms:
             if token not in posting_byte_pos:
                 continue
             
@@ -115,9 +119,13 @@ def search_with_or(query_tokens, posting_byte_pos, doc_mapping, top_k=5):
             
             idf = math.log(total_docs / df)
             
+            # EC: n-gram
+            is_ngram = "_" in token
+            ngram_boost = 2.0 if is_ngram else 1.0
+            
             for doc_id, tf, is_important in postings:
                 if tf > 0:
-                    tfidf = (1 + math.log(tf)) * idf
+                    tfidf = (1 + math.log(tf)) * idf * ngram_boost
                     if is_important:
                         tfidf *= 2.0
                     scores[doc_id] += tfidf
@@ -213,6 +221,29 @@ def search_query(query_tokens, posting_byte_pos, doc_mapping, top_k=5):
                     tfidf *= 2.0
                 
                 scores[doc_id] += tfidf
+
+    # EC: 2-gram
+    bigrams = generate_ngrams(query_tokens, 2)
+    with open(MERGED_INDEX, 'rb') as f:
+        for bigram in bigrams:
+            if bigram not in posting_byte_pos:
+                continue
+            
+            offset, length = posting_byte_pos[bigram]
+            f.seek(offset)
+            byte_raw_data = f.read(length)
+            postings = decode(byte_raw_data)
+            
+            df = len(postings)
+            if df == 0:
+                continue
+            
+            idf = math.log(total_docs / df)
+            
+            for doc_id, tf, is_important in postings:
+                if doc_id in valid_doc_ids and tf > 0:
+                    tfidf = (1 + math.log(tf)) * idf * 3.0
+                    scores[doc_id] += tfidf
 
     # ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     ranked = heapq.nlargest(top_k, scores.items(), key=lambda x: x[1])
