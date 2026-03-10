@@ -153,9 +153,16 @@ def search_with_or(query_tokens, posting_byte_pos, doc_mapping, top_k=5):
                 continue
             
             offset, length = posting_byte_pos[token]
+
+            if length > 500000:  # Skip overly long posting lists (those containing words like "the" or "is").
+                continue
+
             f.seek(offset)
             byte_raw_data = f.read(length)
             postings = decode(byte_raw_data)
+
+            if len(postings) > 5000: #Limit the number of postings processed per token
+                postings = postings[:5000]
             
             df = len(postings)
             if df == 0:
@@ -312,6 +319,10 @@ def search_query(query_tokens, posting_byte_pos, doc_mapping, top_k=5):
                 continue
             
             offset, length = posting_byte_pos[bigram]
+
+            if length > 200000:
+                continue
+
             f.seek(offset)
             byte_raw_data = f.read(length)
             postings = decode(byte_raw_data)
